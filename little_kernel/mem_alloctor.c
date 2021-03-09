@@ -17,6 +17,7 @@ enum free_list_type {
 	SUPPORTED_FREE_LIST_TYPE_NR 
 }
 #define KB(n) (n << 10)
+#define GB_mask ((n << 30) - 1)
 struct free_node {
 	struct free_node *next;
 	void *start;
@@ -65,12 +66,36 @@ struct atom_cache_desc {
 	struct atom_cache_unit *free_unit_root;
 }
 
-static void *create_unit_cache_from_memory_node(unit_cache_root, void *start, u64 mem_size, u64 unit_size)
+struct free_list_atom_cache {
+
+};
+struct mem_chunk {
+	void *addr;
+	u64 size;
+};
+s32 setup_free_list(struct mem_chunk *mc)
 {
-	if (mem_size < unit_size) {
-		err("cache unit %lld > mem_size %lld\n", unit_size, mem_size);
-		return -1;
+	s32 i = 0, sum = 0;
+
+	while (mc[i] != NULL) {
+
+		/* calulate how many atom_cache_unit is need */
+		sum += mc[i].size & (~(u64)GB_mask);
+		sum += mc[i].size & (~(u64)GB_mask);
+
+
+		/* use mem save atom_cache_unit from start or scattered memory */
+
 	}
-	
+	free_list_root
+}
+
+
+static void *create_unit_cache_on_mem_node(
+		struct atom_cache_desc **unit_cache_root, void *addr,
+	       	enum free_list_type flt, u64 unit_size)
+{
+	struct atom_cache_desc *acd = addr;
+
 
 }
