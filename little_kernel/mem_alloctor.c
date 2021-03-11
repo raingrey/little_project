@@ -23,20 +23,18 @@ struct free_node {
 	struct free_node *next;
 	void *start;
 };
-#define MAX_MEM_MODE_WEIGHTS 30/* 1GB */
-#define MIN_MEM_MODE_WEIGHTS 12/* 4KB */
+#define MAX_MEM_NODE_WEIGHTS 30/* 1GB */
+#define MIN_MEM_NODE_WEIGHTS 12/* 4KB */
 static struct free_node *free_list_root
-			[MAX_MEM_MODE_WEIGHTS - MAX_MEM_MODE_WEIGHTS] = NULL;
+			[MAX_MEM_NODE_WEIGHTS - MAX_MEM_NODE_WEIGHTS] = NULL;
 
-static struct free_node *decrease_free_node(s32 weight)
+static inline struct free_node *decrease_free_node(s32 weight)
 {
 	struct free_node *node;
 
-	if (free_list_root[weight] == NULL) {
-		return NULL;
-	}
 	node = free_list_root[weight];
 	free_list_root[weight] = free_list_root[weight]->next;
+	return node;
 }
 
 static inline void increase_free_node(struct free_node *fn, s32 weight)
@@ -59,6 +57,30 @@ static s32 release_memory(void *start, u64 size)
 	if (fn == NULL) {
 		
 	}
+}
+
+struct free_node *alloc_mem_node(s32 weight)
+{
+	struct free_node *fn;
+	void *p;
+
+	if (weight > MAX_MEM_NODE_WEIGHTS) {
+		err("weight overflow %d > %d\n", weight, MAX_MEM_NODE_WEIGHTS);
+		return NULL;
+	}
+	if (free_list_root[weight]) {
+		return decrease_free_node(weight);
+	}
+	fn = alloc_mem_node(weight + 1);
+	if (fn == NULL) {
+		return NULL;
+	}
+	p = fn->start;
+	fn->start = p + (1 << weight);
+	increase_free_node(fn, weight);
+	fn = alloc_mem_node_atom_cache();
+	fn->start = p;
+	return fn;
 }
 
 struct atom_cache_unit {
@@ -187,16 +209,16 @@ s32 setup_free_list(void *addr, u64 size)
 
 	cur = addr;
 	end = addr + size;
-	weight = MAX_MEM_MODE_WEIGHTS;
+	weight = MAX_MEM_NODE_WEIGHTS;
 again:
-	while (weight < MIN_MEM_MODE_WEIGHTS) {
+	while (weight < MIN_MEM_NODE_WEIGHTS) {
 		if (((1 << weight) - 1) & cur) {
 			weight--;
 		} else {
 			break;
 		}
 	}
-	if (weight < MIN_MEM_MODE_WEIGHTS) {
+	if (weight < MIN_MEM_NODE_WEIGHTS) {
 		err("Invalid addr 0x%llx\n", addr);
 		return -1;
 	}
@@ -207,12 +229,13 @@ again:
 		free_list_root[weight]->fn;
 		sum++;
 		cur += (1 << weight);
-		weight = MAX_MEM_MODE_WEIGHTS;
+		weight = MAX_MEM_NODE_WEIGHTS;
 		goto again;
 	} else if (cur + (1 << weight) > end) {
 		weight--;
 		goto again;
 	}
+	return 0;
 }
 
 /* allowed minimum memory node is 4KB */
@@ -228,5 +251,9 @@ s32 start_memory(void *addr, u64 size)
 		return -1;
 	}
 	first_memory_to_mem_node_atom_cache(addr, KB(4));
+	ret = setup_free_list(addr + KB(4), size - KB(4));
+	if (ret < 0) {
+		return ret;
+	}
 
 }
