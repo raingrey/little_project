@@ -23,8 +23,6 @@ struct free_node {
 	struct free_node *next;
 	void *start;
 };
-#define MAX_MEM_NODE_WEIGHTS 30/* 1GB */
-#define MIN_MEM_NODE_WEIGHTS 12/* 4KB */
 static struct free_node *free_list_root
 			[MAX_MEM_NODE_WEIGHTS - MAX_MEM_NODE_WEIGHTS] = NULL;
 
@@ -87,20 +85,12 @@ struct atom_cache_unit {
 	struct atom_cache_unit *next_free_unit;
 	void *addr;
 };
-#define ATOM_CACHE_BIT_ALIGN_OFFSET 6
-#define ATOM_CACHE_BIT_ALIGN (1 << 6) //64
-struct atom_cache_desc {
-	u32 nr_free_unit;
-	u16 first_unit_u64_offset;
-	u16 atom_size_u64_offset;
-	void *full_unit_node;
-	void *free_unit_node;
-}
 
 static struct atom_cache_desc mem_node_atom_cache = {
 	.nr_free_unit = 0;
 	.first_unit_u64_offset = 0;
-	.atom_size_u64_offset = 1;//unit size 16, (1 << 1)u64
+	.atom_size_weight = 4; //unit size 16 byte
+	.used_mem_node_weight = 12; /* 4KB */
 	.full_unit_node = NULL;
 	.free_unit_node = NULL;
 };
@@ -125,81 +115,8 @@ static void *create_unit_cache_on_mem_node(
 
 }
 
-#define NEXT_PAGE_ADDR_MASK (~((1 << 9) - 1))
-#define NR_FREE_UNIT_IN_NEXT_PAGE_ADDR_MASK ((1 << 9) - 1)
-static void *alloc_mem_node_atom_cache(void)
-{
-	struct atom_cache_desc *acd = &mem_node_atom_cache;
-	u64 *p;
-	s32 i, j, num;
-	void *pfull, *pfree, *pret;
 
-	/* highway */
-	if (acd->nr_free_unit) {
-		acd->nr_free_unit--; 
-		p = acd->free_unit_node + 1;
-		i = acd->first_unit_u64_offset;
-		while (i > 0) {
-			if (p[i]) {
-				num = i << ATOM_CACHE_BIT_ALIGN_OFFSET;
-				j = __builtin_ffsll(p[i]);
-				num += j;
-				j--;
-				p[i] &= (~(1 << j));
-			}
-		}
-		pret = acd->free_unit_node + 1 + acd->first_unit_u64_offset - 1
-			+ num << acd->atom_size_u64_offset;
-		p = acd->free_unit_node;
-		/* how many free unit still in this node */
-		num = (*p & NR_FREE_UNIT_IN_NEXT_PAGE_ADDR_MASK) - 1;
-		*p = (*p & NEXT_PAGE_ADDR_MASK) + num;
-		if (num == 0) {
-			pfree = *(acd->free_unit_root);
-			*(acd->free_unit_root) = acd->full_unit_root;
-			acd->full_unit_root = acd->free_unit_root;
-			acd->free_unit_root = pfree;
-		}
-		return pret;
-	}
-	/* TODO: not realize more than one node */
-}
 
-s32 free_mem_node_atom_cache(void)
-{
-	/* TODO: not realize return unit back to atom_cache */
-	return 0;
-}
-
-static void first_memory_to_mem_node_atom_cache(void *addr, u64 size)
-{
-	s32 i, j, num, reminder, tmp;
-	u64 *bit_start;
-	struct atom_cache_desc *acd = &mem_node_atom_cache;
-
-	mem_node_atom_cache.free_unit_node = addr;
-	num = acd.atom_size_u64_offset * ATOM_CACHE_BIT_ALIGN + 1;
-	num = size * 8 / (num);
-	/* if space needed for free bit is aligned */
-	reminder = (num / ATOM_CACHE_BIT_ALIGN) ? 1 : 0;
-	num -= reminder;
-	/* now num is number of unit that this memory can carry */
-	acd->nr_free_unit = num;
-	*((u64 *)addr) = num;
-
-	bit_start = addr + 1;
-	tmp = num / ATOM_CACHE_BIT_ALIGN;
-	for (i = 0; i < tmp; i++) {
-		bit_start[i] = -1ull;
-	}
-	bit_start[i] = 0;
-	j = 0;
-	while (j < num % ATOM_CACHE_BIT_ALIGN) {
-		bit_start[i] |= (1 << j);
-	}
-	acd->first_unit_u64_offset = &bit_start[i] - addr + 1;
-	return;
-}
 
 s32 setup_free_list(void *addr, u64 size)
 {
